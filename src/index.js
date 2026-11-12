@@ -254,14 +254,40 @@ export async function runMonitor(env) {
   console.log(`扫描完成：${currentScores.length} 场考试，${changes.length} 项成绩变化`);
 }
 
+function sameSecret(value, expected) {
+  const left = new TextEncoder().encode(value);
+  const right = new TextEncoder().encode(expected);
+  let difference = left.length ^ right.length;
+  const length = Math.max(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    difference |= (left[index] ?? 0) ^ (right[index] ?? 0);
+  }
+  return difference === 0;
+}
+
+function logMonitorFailure(error) {
+  console.error(`智学网监控失败：${error instanceof Error ? error.message : "未知错误"}`);
+  throw error;
+}
+
 export default {
   async scheduled(_controller, env, ctx) {
-    ctx.waitUntil(runMonitor(env).catch((error) => {
-      console.error(`智学网监控失败：${error instanceof Error ? error.message : "未知错误"}`);
-      throw error;
-    }));
+    ctx.waitUntil(runMonitor(env).catch(logMonitorFailure));
   },
-  async fetch() {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+    if (url.pathname === "/__run") {
+      if (request.method !== "POST") return new Response("Method not allowed", { status: 405 });
+      if (!env.MANUAL_TRIGGER_KEY) return new Response("Manual trigger is not configured", { status: 503 });
+
+      const authorization = request.headers.get("Authorization") ?? "";
+      if (!sameSecret(authorization, `Bearer ${env.MANUAL_TRIGGER_KEY}`)) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+
+      ctx.waitUntil(runMonitor(env).catch(logMonitorFailure));
+      return new Response("Monitor run started", { status: 202 });
+    }
     return new Response("智学网成绩监控已运行", { headers: { "content-type": "text/plain; charset=utf-8" } });
   },
 };

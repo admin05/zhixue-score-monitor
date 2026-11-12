@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { buildSessionCookie, findScoreChanges, md5Hex, parseCookieHeader, runMonitor } from "../src/index.js";
+import monitor, { buildSessionCookie, findScoreChanges, md5Hex, parseCookieHeader, runMonitor } from "../src/index.js";
 
 test("parses cookie values containing equals signs", () => {
   assert.deepEqual(parseCookieHeader("a=1; loginUserName=student%3D1; session=abc=="), {
@@ -51,6 +51,49 @@ test("includes safe upstream diagnostics for failed Zhixue requests", async () =
     );
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("protects the manual trigger endpoint and accepts authorized POST requests", async () => {
+  const request = new Request("https://monitor.example/__run", { method: "POST" });
+  const unauthorized = await monitor.fetch(request, { MANUAL_TRIGGER_KEY: "expected" }, { waitUntil() {} });
+  assert.equal(unauthorized.status, 401);
+
+  const wrongMethod = await monitor.fetch(
+    new Request("https://monitor.example/__run"),
+    { MANUAL_TRIGGER_KEY: "expected" },
+    { waitUntil() {} },
+  );
+  assert.equal(wrongMethod.status, 405);
+
+  const originalFetch = globalThis.fetch;
+  const originalConsoleError = console.error;
+  let monitorTask;
+  globalThis.fetch = async () => new Response("upstream error", {
+    status: 525,
+    headers: { server: "test-proxy" },
+  });
+  console.error = () => {};
+
+  try {
+    const accepted = await monitor.fetch(
+      new Request("https://monitor.example/__run", {
+        method: "POST",
+        headers: { Authorization: "Bearer expected" },
+      }),
+      {
+        MANUAL_TRIGGER_KEY: "expected",
+        ZHIXUE_COOKIE: "test-cookie",
+        STATE: { async get() { return null; } },
+      },
+      { waitUntil(task) { monitorTask = task; } },
+    );
+    assert.equal(accepted.status, 202);
+    assert.equal(await accepted.text(), "Monitor run started");
+    await assert.rejects(monitorTask, /智学网请求失败 \(525/);
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.error = originalConsoleError;
   }
 });
 
