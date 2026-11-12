@@ -3,6 +3,12 @@
 	"name": "zhixue-score-monitor",
 	"main": "src/index.js",
 	"compatibility_date": "2026-11-12",
+	"observability": {
+		"logs": {
+			"enabled": true,
+			"invocation_logs": true
+		}
+	},
 	"triggers": {
 		"crons": [
 			"*/15 * * * *"
