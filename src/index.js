@@ -16,6 +16,14 @@ export function parseCookieHeader(value) {
   return cookies;
 }
 
+export function buildSessionCookie(value) {
+  const cookie = value.trim();
+  const cookies = parseCookieHeader(cookie);
+  const loginUserName = cookies.loginUserName;
+  if (!loginUserName || Object.keys(cookies).some((name) => name.toLowerCase() === "uname")) return cookie;
+  return `${cookie}; uname=${btoa(loginUserName)}`;
+}
+
 export function findScoreChanges(previous, current) {
   const changes = [];
   for (const exam of current) {
@@ -159,16 +167,7 @@ function scoreSnapshot(examId, examName, report) {
 }
 
 async function loadCurrentScores(cookie) {
-  const parsedCookies = parseCookieHeader(cookie);
-  const loginUserName = parsedCookies.loginUserName;
-  if (!loginUserName) throw new Error("Cookie 缺少 loginUserName，请重新从智学网登录页复制 Cookie");
-  const encodedName = btoa(loginUserName);
-  const sessionCookie = [
-    ...Object.entries(parsedCookies)
-      .filter(([name]) => name.toLowerCase() !== "uname")
-      .map(([name, value]) => `${name}=${value}`),
-    `uname=${encodedName}`,
-  ].join("; ");
+  const sessionCookie = buildSessionCookie(cookie);
 
   const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie), "账号信息");
   if (user?.role && user.role !== "student") throw new Error("当前 Cookie 对应的不是学生账号");

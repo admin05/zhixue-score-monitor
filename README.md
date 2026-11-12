@@ -30,7 +30,7 @@ Cloudflare Worker 定时读取智学网学生成绩；首次执行只保存当�
    npx wrangler secret put BARK_KEY
    ```
 
-   Cookie 必须从已登录的智学网网页中复制，且包含 `loginUserName`。不要将 Cookie、密码、Bark key 或成绩写入仓库。
+   Cookie 必须从已登录的智学网网页请求中完整复制，直接粘贴，不要手动添加字段。代码会原样使用当前浏览器 Cookie；若存在旧式 `loginUserName` 字段，则兼容性地补上 `uname`。不要将 Cookie、密码、Bark key 或成绩写入仓库。
 
 4. 部署 Worker：
 

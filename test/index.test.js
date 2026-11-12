@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { findScoreChanges, md5Hex, parseCookieHeader, runMonitor } from "../src/index.js";
+import { buildSessionCookie, findScoreChanges, md5Hex, parseCookieHeader, runMonitor } from "../src/index.js";
 
 test("parses cookie values containing equals signs", () => {
   assert.deepEqual(parseCookieHeader("a=1; loginUserName=student%3D1; session=abc=="), {
@@ -8,6 +8,18 @@ test("parses cookie values containing equals signs", () => {
     loginUserName: "student%3D1",
     session: "abc==",
   });
+});
+
+test("uses current browser cookies as-is when loginUserName is absent", () => {
+  assert.equal(buildSessionCookie("JSESSIONID=session; tlsysSessionId=system; ui=desktop"),
+    "JSESSIONID=session; tlsysSessionId=system; ui=desktop");
+});
+
+test("adds the legacy uname cookie only when loginUserName exists", () => {
+  assert.equal(buildSessionCookie("loginUserName=student; JSESSIONID=session"),
+    "loginUserName=student; JSESSIONID=session; uname=c3R1ZGVudA==");
+  assert.equal(buildSessionCookie("loginUserName=student; uname=already-set"),
+    "loginUserName=student; uname=already-set");
 });
 
 test("computes MD5 hashes needed by the Zhixue token endpoint", () => {
@@ -58,7 +70,7 @@ test("stores a baseline first, then notifies only after a score changes", async 
   };
 
   const env = {
-    ZHIXUE_COOKIE: "loginUserName=student; session=test-session",
+    ZHIXUE_COOKIE: "JSESSIONID=test-session; tlsysSessionId=test-system-session",
     BARK_KEY: "test-bark-key",
     STATE: {
       async get(_key, type) {
