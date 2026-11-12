@@ -1,15 +1,17 @@
 {
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "zhixue-score-monitor",
-  "main": "src/index.js",
-  "compatibility_date": "2026-11-12",
-  "triggers": {
-    "crons": ["*/15 * * * *"]
-  },
-  "kv_namespaces": [
-    {
-      "binding": "STATE",
-      "id": "REPLACE_WITH_KV_NAMESPACE_ID"
-    }
-  ]
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "zhixue-score-monitor",
+	"main": "src/index.js",
+	"compatibility_date": "2026-11-12",
+	"triggers": {
+		"crons": [
+			"*/15 * * * *"
+		]
+	},
+	"kv_namespaces": [
+		{
+			"binding": "STATE",
+			"id": "71afa8ee04fc49818cf50ecfd98e0f7d"
+		}
+	]
 }
