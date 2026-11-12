@@ -27,6 +27,33 @@ test("computes MD5 hashes needed by the Zhixue token endpoint", () => {
   assert.equal(md5Hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
 });
 
+test("includes safe upstream diagnostics for failed Zhixue requests", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response("upstream error", {
+    status: 525,
+    headers: { server: "test-proxy", "cf-ray": "test-ray" },
+  });
+
+  try {
+    await assert.rejects(
+      runMonitor({
+        ZHIXUE_COOKIE: "sensitive-cookie=value",
+        STATE: { async get() { return null; } },
+      }),
+      (error) => {
+        assert.match(error.message, /智学网请求失败 \(525/);
+        assert.match(error.message, /URL=https:\/\/www\.zhixue\.com\/container\/getCurrentUser/);
+        assert.match(error.message, /Server=test-proxy/);
+        assert.match(error.message, /CF-Ray=test-ray/);
+        assert.doesNotMatch(error.message, /sensitive-cookie/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("reports newly published and corrected subject scores without treating the first baseline as changes", () => {
   const previous = {
     exam1: { name: "月考", subjects: { math: { name: "数学", score: 90 } } },

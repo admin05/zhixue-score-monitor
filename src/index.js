@@ -116,7 +116,13 @@ async function getJson(url, headers = {}) {
     headers: { "User-Agent": USER_AGENT, Referer: "https://www.zhixue.com/", ...headers },
     redirect: "follow",
   });
-  if (!response.ok) throw new Error(`智学网请求失败 (${response.status})`);
+  if (!response.ok) {
+    const server = response.headers.get("server") ?? "unknown";
+    const cfRay = response.headers.get("cf-ray");
+    const diagnostics = [`URL=${url.origin}${url.pathname}`, `Server=${server}`];
+    if (cfRay) diagnostics.push(`CF-Ray=${cfRay}`);
+    throw new Error(`智学网请求失败 (${response.status}; ${diagnostics.join("; ")})`);
+  }
   const body = await response.json();
   if (body?.success === false || body?.code === "401" || body?.code === 401) {
     throw new Error("智学网拒绝了请求，请检查登录 Cookie 是否过期");
