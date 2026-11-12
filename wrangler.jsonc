@@ -9,11 +9,6 @@
 			"invocation_logs": true
 		}
 	},
-	"triggers": {
-		"crons": [
-			"*/15 * * * *"
-		]
-	},
 	"kv_namespaces": [
 		{
 			"binding": "STATE",
