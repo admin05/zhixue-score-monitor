@@ -1,12 +1,48 @@
 # 智学网成绩监控
 
-Cloudflare Worker 定时读取智学网学生成绩；首次执行只保存当前基线，之后新增科目成绩或成绩更正时通过 Bark 通知。当前扫描最近学年考试列表第一页（最多 10 场）。
+定时读取智学网学生成绩，支持 NAS Arcadia（Node.js）和 Cloudflare Worker 两种运行方式。首次执行保存当前基线，之后新增科目成绩或成绩更正时通过 Bark 通知。当前扫描最近学年考试列表第一页（最多 10 场）。
+
+## NAS / Arcadia 部署
+
+Arcadia 版本入口为 `scripts/arcadia-monitor.js`，使用 Node.js 22 或更高版本，无第三方运行时依赖，不需要 Cloudflare、KV、Wrangler 或 `npm install`。每次启动扫描一次并退出，由 Arcadia 定时调度。
+
+1. 在 Arcadia 容器的持久化脚本目录中克隆本仓库，或通过 Arcadia 的仓库同步功能同步完整仓库：
+
+   ```sh
+   git clone https://github.com/admin05/zhixue-score-monitor.git
+   ```
+
+   保留 `package.json`、`scripts/` 和 `src/` 的相对目录结构。不要仅下载入口文件，也不要只把入口文件复制到另一个目录；它需要引用 `../src/` 中的模块。若使用自动仓库同步，只为 `scripts/arcadia-monitor.js` 创建定时任务，避免将 `src/` 或 `test/` 中的文件识别为任务。
+
+2. 在 Arcadia 环境变量配置中添加：
+
+   | 变量 | 必填 | 说明 |
+   | --- | --- | --- |
+   | `ZHIXUE_COOKIE` | 是 | 已登录智学网网页请求中的完整 Cookie，与 Worker 版相同 |
+   | `BARK` | 建议 | Bark 设备 key，直接使用 Arcadia 中已有的变量；填写 key 本身，不填完整推送 URL |
+   | `ZHIXUE_STATE_FILE` | 否 | 成绩快照的绝对路径，建议设到容器已映射到 NAS 的持久化数据目录 |
+
+   默认快照位于仓库的 `data/score-snapshot.json`。确保该目录持久化且可写；仓库同步若会清理本地文件，应通过 `ZHIXUE_STATE_FILE` 将快照放在同步目录外。快照包含成绩，不要上传到 GitHub；默认 `data/` 已被 Git 忽略。Cookie 和 Bark key 只在 Arcadia 环境变量中配置，不写入脚本。
+
+3. 在 Arcadia 新建执行任务，命令使用容器中仓库的实际绝对路径：
+
+   ```sh
+   node /实际仓库路径/zhixue-score-monitor/scripts/arcadia-monitor.js
+   ```
+
+   也可在仓库根目录手动运行 `npm run start:arcadia`。设置每 15 分钟执行一次：五字段 Cron 为 `*/15 * * * *`，包含秒的六字段 Cron 为 `0 */15 * * * *`；入口文件包含六字段 `Cron` 注释。首次先手动执行一次，确认日志显示“基线已建立”。
+
+4. 每次运行发送一条 Bark 结果通知，包含脚本名、成功/失败状态和扫描摘要；成绩变化时附带最多 18 项变化摘要。首次运行只建立基线并推送运行成功摘要，不补发已有成绩。失败退出码为 `1`，成功为 `0`。
+
+缺少 `BARK` 时记录提示并继续保存快照，该次成绩变化不会在补配 `BARK` 后补发。已经配置 `BARK` 但成绩变化通知发送失败时不推进快照，下次运行会重试。登录过期时在 Arcadia 更新 `ZHIXUE_COOKIE` 即可，不要删除成绩快照。
+
+快照采用临时文件写入后替换，读取到损坏的快照会报错并保留原文件。相同快照路径使用 `.lock` 目录避免任务重叠写入；若容器被强制停止且留下锁，确认旧进程已经停止后，移除快照旁的 `.lock` 空目录再重试。不要同时为同一个账号重复创建任务。
 
 ## 当前已确认的接口
 
 实现参考 [anwenhu/zhixuewang-python](https://github.com/anwenhu/zhixuewang-python)：会话通过 `loginUserName` Cookie 构造 `uname`，调用 `/container/getCurrentUser` 检查会话；成绩查询使用短时 `XToken` 请求学年、考试列表和 `/zhixuebao/report/exam/getReportMain?examId=...`。参考项目近期说明智学网登录及部分接口发生变化，用户名密码登录仍可能要求浏览器完成人机验证，因此 Worker 使用手动登录后复制的 Cookie，不会尝试绕过验证。
 
-## 部署
+## Cloudflare Worker 部署
 
 需要 Node.js 和 Wrangler 4，以及一个 Cloudflare 账号。
 

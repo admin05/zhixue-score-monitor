@@ -117,6 +117,7 @@ async function getJson(url, headers = {}) {
     response = await fetch(url, {
       headers: { "User-Agent": USER_AGENT, Referer: "https://www.zhixue.com/", ...headers },
       redirect: "follow",
+      signal: AbortSignal.timeout(30_000),
     });
   } catch (error) {
     const code = error?.cause?.code ?? error?.code ?? error?.name ?? "unknown";
@@ -233,7 +234,7 @@ async function loadCurrentScores(cookie) {
   return snapshots;
 }
 
-async function sendBark(key, changes) {
+export function formatScoreChanges(changes) {
   const lines = changes.slice(0, 18).map((change) => {
     const value = change.kind === "changed"
       ? `${change.oldScore} → ${change.score}`
@@ -241,12 +242,16 @@ async function sendBark(key, changes) {
     return `${change.exam} / ${change.subject}: ${value}`;
   });
   if (changes.length > lines.length) lines.push(`另有 ${changes.length - lines.length} 项变化`);
-  const url = new URL(`https://api.day.app/${encodeURIComponent(key)}/${encodeURIComponent("智学网成绩更新")}/${encodeURIComponent(lines.join("\n"))}`);
+  return lines.join("\n").slice(0, 2000);
+}
+
+async function sendBark(key, changes) {
+  const url = new URL(`https://api.day.app/${encodeURIComponent(key)}/${encodeURIComponent("智学网成绩更新")}/${encodeURIComponent(formatScoreChanges(changes))}`);
   const response = await fetch(url);
   if (!response.ok) throw new Error(`Bark 推送失败 (${response.status})`);
 }
 
-export async function runMonitor(env) {
+export async function runMonitor(env, { notifyChanges } = {}) {
   if (!env.ZHIXUE_COOKIE) throw new Error("缺少 ZHIXUE_COOKIE Secret");
   if (!env.STATE) throw new Error("缺少 STATE KV 绑定");
 
@@ -259,11 +264,17 @@ export async function runMonitor(env) {
   if (previousState === null) {
     await env.STATE.put(STATE_KEY, JSON.stringify({ version: 1, grades: current }));
     console.log(`基线已建立：扫描 ${currentScores.length} 场考试`);
-    return;
+    return { examCount: currentScores.length, changeCount: 0, baselineCreated: true };
   }
 
-  if (changes.length && !env.BARK_KEY) throw new Error("发现成绩变化，但缺少 BARK_KEY Secret");
-  if (changes.length) await sendBark(env.BARK_KEY, changes);
+  if (changes.length) {
+    if (notifyChanges) {
+      await notifyChanges(changes, { examCount: currentScores.length });
+    } else {
+      if (!env.BARK_KEY) throw new Error("发现成绩变化，但缺少 BARK_KEY Secret");
+      await sendBark(env.BARK_KEY, changes);
+    }
+  }
   const merged = { ...previous };
   for (const [id, exam] of Object.entries(current)) {
     merged[id] = {
@@ -274,6 +285,7 @@ export async function runMonitor(env) {
   }
   await env.STATE.put(STATE_KEY, JSON.stringify({ version: 1, grades: merged }));
   console.log(`扫描完成：${currentScores.length} 场考试，${changes.length} 项成绩变化`);
+  return { examCount: currentScores.length, changeCount: changes.length, baselineCreated: false };
 }
 
 function sameSecret(value, expected) {
