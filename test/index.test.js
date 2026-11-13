@@ -132,6 +132,71 @@ test("identifies rejected endpoints without exposing response messages or creden
   }
 });
 
+test("recognizes the token endpoint errorCode 3002 and safe fixed errorInfo", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (input) => {
+    if (new URL(input).pathname === "/container/getCurrentUser") return Response.json({ result: { role: "student" } });
+    return Response.json({ errorCode: 3002, errorInfo: "未登录或登录失效", result: "", success: false });
+  };
+  try {
+    await assert.rejects(probeZhixue("private-cookie=value"), (error) => {
+      assert.match(error.message, /接口=\/container\/app\/token\/getToken/);
+      assert.match(error.message, /errorCode=3002/);
+      assert.match(error.message, /原因=未登录或登录失效/);
+      assert.match(error.message, /登录凭据被拒绝/);
+      assert.doesNotMatch(error.message, /private-cookie/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("rejects account errorCode -200 even without a success field and never requests a token", async () => {
+  const originalFetch = globalThis.fetch;
+  const requested = [];
+  globalThis.fetch = async (input) => {
+    requested.push(new URL(input).pathname);
+    return Response.json({ errorCode: -200, errorInfo: "操作失败", result: null });
+  };
+  try {
+    await assert.rejects(probeZhixue("private-cookie=value"), /errorCode=-200.*原因=操作失败/);
+    assert.deepEqual(requested, ["/container/getCurrentUser"]);
+    for (const result of [null, "", [], {}]) {
+      requested.length = 0;
+      globalThis.fetch = async (input) => {
+        requested.push(new URL(input).pathname);
+        return Response.json({ result });
+      };
+      await assert.rejects(probeZhixue("private-cookie=value"), /账号信息为空或格式异常.*未通过登录检查/);
+      assert.deepEqual(requested, ["/container/getCurrentUser"]);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("suppresses arbitrary errorInfo strings and accepts successful zero errorCode", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ errorCode: 9999, errorInfo: "sensitive-session-value", result: null });
+    await assert.rejects(probeZhixue("private-cookie=value"), (error) => {
+      assert.match(error.message, /errorCode=9999/);
+      assert.doesNotMatch(error.message, /sensitive-session-value|private-cookie/);
+      return true;
+    });
+    globalThis.fetch = async (input) => {
+      const path = new URL(input).pathname;
+      const result = path === "/container/getCurrentUser" ? { role: "student" } :
+        path === "/container/app/token/getToken" ? "test-token" : [];
+      return Response.json({ errorCode: 0, success: true, result });
+    };
+    assert.deepEqual(await probeZhixue("private-cookie=value"), { academicYearCount: 0, examCount: 0 });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("protects the manual trigger endpoint and accepts authorized POST requests", async () => {
   const request = new Request("https://monitor.example/__run", { method: "POST" });
   const unauthorized = await monitor.fetch(request, { MANUAL_TRIGGER_KEY: "expected" }, { waitUntil() {} });

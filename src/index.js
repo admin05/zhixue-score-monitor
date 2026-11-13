@@ -134,12 +134,19 @@ async function getJson(url, headers = {}, fetchZhixue = globalThis.fetch) {
     throw new Error(`智学网请求失败 (${response.status}; ${diagnostics.join("; ")})`);
   }
   const body = await response.json();
-  if (body?.success === false || body?.code === "401" || body?.code === 401) {
+  const numericCode = (value) => /^-?\d{1,9}$/.test(String(value ?? "")) ? String(value) : null;
+  const code = numericCode(body?.code);
+  const errorCode = numericCode(body?.errorCode);
+  const loginRejected = code === "401" || errorCode === "401" || errorCode === "3002";
+  const upstreamError = body?.success !== true && errorCode !== null && !["0", "200"].includes(errorCode);
+  if (body?.success === false || loginRejected || upstreamError) {
     // 只记录接口路径及数字错误码，不输出响应正文、令牌或查询参数。
-    const code = /^-?\d{1,9}$/.test(String(body?.code ?? "")) ? String(body.code) : "未提供数字错误码";
-    const details = [`接口=${url.pathname}`, `HTTP=${response.status}`, `code=${code}`];
+    const details = [`接口=${url.pathname}`, `HTTP=${response.status}`, `code=${code ?? "未提供数字错误码"}`];
+    if (errorCode !== null) details.push(`errorCode=${errorCode}`);
     if (body?.success === false) details.push("success=false");
-    const suggestion = code === "401"
+    // 只允许这两个已核对过的固定提示，不输出任意 errorInfo 内容。
+    if (["未登录或登录失效", "操作失败"].includes(body?.errorInfo)) details.push(`原因=${body.errorInfo}`);
+    const suggestion = loginRejected
       ? "登录凭据被拒绝，请重新登录并更新 ZHIXUE_COOKIE 后重试"
       : "请结合接口及错误码排查登录状态或接口异常，不能仅凭 success=false 判定 Cookie 过期";
     throw new Error(`智学网拒绝了请求 (${details.join("; ")})；${suggestion}`);
@@ -193,6 +200,9 @@ async function loadExamContext(cookie, fetchZhixue) {
   const sessionCookie = buildSessionCookie(cookie);
 
   const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie, {}, {}, fetchZhixue), "账号信息");
+  if (!user || typeof user !== "object" || Array.isArray(user) || Object.keys(user).length === 0) {
+    throw new Error("账号信息为空或格式异常 (接口=/container/getCurrentUser)，未通过登录检查，请重新登录并更新 ZHIXUE_COOKIE 后重试");
+  }
   if (user?.role && user.role !== "student") throw new Error("当前 Cookie 对应的不是学生账号");
 
   const auth = await getAuthHeaders(sessionCookie, fetchZhixue);
