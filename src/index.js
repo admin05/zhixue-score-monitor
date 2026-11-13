@@ -135,7 +135,14 @@ async function getJson(url, headers = {}, fetchZhixue = globalThis.fetch) {
   }
   const body = await response.json();
   if (body?.success === false || body?.code === "401" || body?.code === 401) {
-    throw new Error("智学网拒绝了请求，请检查登录 Cookie 是否过期");
+    // 只记录接口路径及数字错误码，不输出响应正文、令牌或查询参数。
+    const code = /^-?\d{1,9}$/.test(String(body?.code ?? "")) ? String(body.code) : "未提供数字错误码";
+    const details = [`接口=${url.pathname}`, `HTTP=${response.status}`, `code=${code}`];
+    if (body?.success === false) details.push("success=false");
+    const suggestion = code === "401"
+      ? "登录凭据被拒绝，请重新登录并更新 ZHIXUE_COOKIE 后重试"
+      : "请结合接口及错误码排查登录状态或接口异常，不能仅凭 success=false 判定 Cookie 过期";
+    throw new Error(`智学网拒绝了请求 (${details.join("; ")})；${suggestion}`);
   }
   return body;
 }

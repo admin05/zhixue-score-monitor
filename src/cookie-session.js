@@ -81,11 +81,13 @@ export async function createCookieSession(seed, filePath) {
   } catch (error) {
     if (error.code !== "ENOENT") throw new Error("读取 Cookie 会话失败，请检查文件权限或移走会话文件后重试；成绩快照无需删除");
   }
+  const source = cookies ? "本地持久化会话" : "ZHIXUE_COOKIE 环境变量";
   if (!cookies) {
     cookies = importCookies(seed);
     if (!cookies.length) throw new Error("ZHIXUE_COOKIE 格式无效，请填写完整 Cookie 请求头的值");
   }
   let updateCount = 0;
+  let deletionCount = 0;
 
   async function save() {
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
@@ -103,7 +105,9 @@ export async function createCookieSession(seed, filePath) {
   // 先保存手动导入结果；后续失败也不恢复已经失效的旧 Cookie。
   await save();
   return {
+    source,
     get updateCount() { return updateCount; },
+    get deletionCount() { return deletionCount; },
     async fetch(input, options = {}) {
       let url = new URL(input);
       for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
@@ -118,10 +122,12 @@ export async function createCookieSession(seed, filePath) {
         const response = await fetch(url, { ...options, headers, redirect: "manual" });
         const lines = response.headers.getSetCookie();
         let updates = 0;
+        let deletions = 0;
         for (const line of lines) {
           const cookie = parseSetCookie(line, url, Date.now());
           if (!cookie) continue;
           updates += 1;
+          if (cookie.expires !== null && cookie.expires <= Date.now()) deletions += 1;
           if (cookie.name.toLowerCase() === "loginusername") {
             const derivedUname = cookies.find((old) => old.derived);
             if (derivedUname) derivedUname.value = btoa(cookie.value);
@@ -133,6 +139,7 @@ export async function createCookieSession(seed, filePath) {
         // 必须在解析 JSON/状态码之前保存：即使后续请求失败，轮换也不能丢。
         await save();
         updateCount += updates;
+        deletionCount += deletions;
         if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has("location")) return response;
         await response.body?.cancel();
         if (redirectCount === 5) throw new Error("智学网请求重定向次数过多");

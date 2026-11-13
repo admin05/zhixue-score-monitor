@@ -33,9 +33,11 @@ test("rotates multiple cookies, keeps equals signs, and reuses them across new s
     ]) : response();
   };
   const session = await createCookieSession(seed, file);
+  assert.equal(session.source, "ZHIXUE_COOKIE 环境变量");
   await session.fetch("https://www.zhixue.com/container/getCurrentUser");
   await session.fetch("https://www.zhixue.com/container/app/token/getToken");
   const nextRun = await createCookieSession(seed, file);
+  assert.equal(nextRun.source, "本地持久化会话");
   await nextRun.fetch("https://www.zhixue.com/zhixuebao/base/common/academicYear");
   for (const header of seen.slice(1)) {
     assert.match(header, /JSESSIONID=rotated==/);
@@ -161,6 +163,7 @@ test("server deletion of all cookies persists without resurrecting the static se
   const session = await createCookieSession("session=seed", file);
   globalThis.fetch = async () => response(["session=; Max-Age=0; Path=/"], { status: 401 });
   const rejected = await session.fetch("https://www.zhixue.com/");
+  assert.equal(session.deletionCount, 1);
   assert.equal(rejected.status, 401);
   const nextRun = await createCookieSession("session=seed", file);
   globalThis.fetch = async (_url, options) => {

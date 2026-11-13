@@ -104,6 +104,34 @@ test("reports safe network error codes when Zhixue cannot be reached", async () 
   }
 });
 
+test("identifies rejected endpoints without exposing response messages or credentials", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async (input) => {
+      const url = new URL(input);
+      if (url.pathname === "/container/getCurrentUser") return Response.json({ result: { role: "student" } });
+      return Response.json({ success: false, code: 401, message: "sensitive-token=private-token" });
+    };
+    await assert.rejects(probeZhixue("private-cookie=value"), (error) => {
+      assert.match(error.message, /接口=\/container\/app\/token\/getToken/);
+      assert.match(error.message, /HTTP=200; code=401; success=false/);
+      assert.match(error.message, /登录凭据被拒绝/);
+      assert.doesNotMatch(error.message, /private-cookie|private-token|sensitive-token/);
+      return true;
+    });
+    globalThis.fetch = async () => Response.json({ success: false, code: "private-error-token", message: "private-message" });
+    await assert.rejects(probeZhixue("private-cookie=value"), (error) => {
+      assert.match(error.message, /接口=\/container\/getCurrentUser/);
+      assert.match(error.message, /code=未提供数字错误码/);
+      assert.match(error.message, /不能仅凭 success=false 判定 Cookie 过期/);
+      assert.doesNotMatch(error.message, /private-error-token|private-message|private-cookie/);
+      return true;
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("protects the manual trigger endpoint and accepts authorized POST requests", async () => {
   const request = new Request("https://monitor.example/__run", { method: "POST" });
   const unauthorized = await monitor.fetch(request, { MANUAL_TRIGGER_KEY: "expected" }, { waitUntil() {} });

@@ -40,6 +40,8 @@ Arcadia 版本入口为 `scripts/arcadia-monitor.js`，使用 Node.js 22 或更�
 
 Arcadia 版会接收智学网响应中的 `Set-Cookie`，包括本站重定向的中间响应，立即更新并保存到成绩快照旁的 `<快照路径>.cookies.json`，例如默认的 `data/score-snapshot.json.cookies.json`。同一次扫描的后续请求和下次定时运行都会使用更新后的 Cookie；即使后续查询或 Bark 通知失败，已保存的 Cookie 更新也会保留。更新时日志只显示条数，不输出 Cookie 值。
 
+日志会标明 Cookie 来自环境变量还是本地持久化会话，并统计服务器要求过期删除的条数。“Cookie 会话更新已持久化”仅表示响应中的 Cookie 已写入，不代表登录验证通过。接口返回拒绝时，错误包含接口路径、HTTP 状态和数字错误码，不包含原始响应、Cookie 或令牌。若新导入的 Cookie 仍失败，可据此区分账号检查、令牌获取和成绩查询阶段；不要仅凭 `success=false` 判断 Cookie 过期。
+
 不需要新增环境变量。已有 `ZHIXUE_COOKIE` 用作首次导入来源；之后优先读取持久化会话。手动更新 `ZHIXUE_COOKIE` 后，脚本通过摘要识别变化，自动替换旧会话，无需删除成绩基线。Cookie 文件采用权限 `0600` 和临时文件替换写入，包含登录凭据，必须与成绩快照一起保存在持久化目录；`*.cookies.json` 已被 Git 忽略。
 
 服务器下发的 Domain、Path、Max-Age 和 Expires 会用于匹配和过期删除。浏览器复制出来的 Cookie 请求头本身没有这些属性，因此初始导入按 `www.zhixue.com` 根路径处理，收到服务器同名更新后再采用服务器给出的属性。请求只跟随 `https://www.zhixue.com` 本站跳转，避免向其他站点发送登录凭据。

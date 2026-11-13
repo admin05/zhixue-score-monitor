@@ -15,6 +15,7 @@ export async function runArcadiaMonitor(env = process.env) {
     if (!env.ZHIXUE_COOKIE?.trim()) throw new Error("缺少 ZHIXUE_COOKIE 环境变量，请在 Arcadia 环境配置中添加登录 Cookie");
     await withFileStateLock(statePath, async () => {
       const session = await createCookieSession(env.ZHIXUE_COOKIE, `${statePath}.cookies.json`);
+      console.log(`Cookie 来源：${session.source}`);
       const result = await runMonitor({
         ZHIXUE_COOKIE: env.ZHIXUE_COOKIE,
         STATE: createFileState(statePath),
@@ -27,7 +28,9 @@ export async function runArcadiaMonitor(env = process.env) {
           `扫描 ${examCount} 场考试；成绩变化 ${changes.length} 项\n${formatScoreChanges(changes)}`,
         ),
       }).finally(() => {
-        if (session.updateCount) console.log(`Cookie 会话更新已持久化：${session.updateCount} 项`);
+        if (session.updateCount) {
+          console.log(`Cookie 会话更新已持久化：${session.updateCount} 项，其中过期删除 ${session.deletionCount} 项（不代表登录验证通过）`);
+        }
       });
       const stage = result.baselineCreated ? "已建立首次成绩基线" : "扫描完成";
       const summary = `${stage}；考试 ${result.examCount} 场；成绩变化 ${result.changeCount} 项`;
