@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatScoreChanges, runMonitor } from "../src/index.js";
 import { sendBarkNotification } from "../src/bark.js";
 import { createFileState, withFileStateLock } from "../src/file-state.js";
+import { createCookieSession } from "../src/cookie-session.js";
 
 const SCRIPT_NAME = "智学网成绩监控 (Arcadia)";
 
@@ -13,16 +14,20 @@ export async function runArcadiaMonitor(env = process.env) {
   try {
     if (!env.ZHIXUE_COOKIE?.trim()) throw new Error("缺少 ZHIXUE_COOKIE 环境变量，请在 Arcadia 环境配置中添加登录 Cookie");
     await withFileStateLock(statePath, async () => {
+      const session = await createCookieSession(env.ZHIXUE_COOKIE, `${statePath}.cookies.json`);
       const result = await runMonitor({
         ZHIXUE_COOKIE: env.ZHIXUE_COOKIE,
         STATE: createFileState(statePath),
       }, {
+        fetchZhixue: (url, options) => session.fetch(url, options),
         // 推送失败时不推进快照，下次运行仍会重试这些变化。
         notifyChanges: (changes, { examCount }) => sendBarkNotification(
           env.BARK,
           `${SCRIPT_NAME}运行成功`,
           `扫描 ${examCount} 场考试；成绩变化 ${changes.length} 项\n${formatScoreChanges(changes)}`,
         ),
+      }).finally(() => {
+        if (session.updateCount) console.log(`Cookie 会话更新已持久化：${session.updateCount} 项`);
       });
       const stage = result.baselineCreated ? "已建立首次成绩基线" : "扫描完成";
       const summary = `${stage}；考试 ${result.examCount} 场；成绩变化 ${result.changeCount} 项`;

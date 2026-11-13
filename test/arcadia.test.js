@@ -148,3 +148,54 @@ test("the actual CLI exits with status 1 for missing configuration without netwo
     return true;
   });
 });
+
+test("Arcadia passes rotated cookies to token and report requests, then reuses them next run", async (t) => {
+  const f = await fixture(t);
+  const upstream = globalThis.fetch;
+  let shouldRotate = true;
+  const requests = [];
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input);
+    if (url.hostname !== "www.zhixue.com") return upstream(input, options);
+    requests.push({ path: url.pathname, cookie: new Headers(options.headers).get("Cookie") });
+    const result = await upstream(input, options);
+    if (shouldRotate && url.pathname === "/container/getCurrentUser") {
+      result.headers.append("Set-Cookie", "JSESSIONID=rotated-secret; Path=/; HttpOnly; Secure");
+      shouldRotate = false;
+    }
+    return result;
+  };
+  assert.equal(await runArcadiaMonitor(f.env), 0);
+  assert.equal(await runArcadiaMonitor(f.env), 0);
+  assert.match(requests[0].cookie, /test-session/);
+  for (const request of requests.slice(1)) assert.equal(request.cookie, "JSESSIONID=rotated-secret");
+  assert.equal(f.logs.some((line) => /rotated-secret/.test(line)), false);
+  assert.ok(f.logs.some((line) => /Cookie 会话更新已持久化/.test(line)));
+});
+
+test("Cookie rotation survives a later failed report and Bark notification", async (t) => {
+  const f = await fixture(t);
+  const upstream = globalThis.fetch;
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input);
+    if (url.pathname === "/container/getCurrentUser") {
+      const result = await upstream(input, options);
+      result.headers.append("Set-Cookie", "JSESSIONID=survives-failure; Path=/");
+      return result;
+    }
+    if (url.pathname === "/zhixuebao/report/exam/getReportMain") return new Response("unavailable", { status: 503 });
+    return upstream(input, options);
+  };
+  f.setBarkStatus(503);
+  assert.equal(await runArcadiaMonitor(f.env), 1);
+  const saved = JSON.parse(await readFile(`${f.env.ZHIXUE_STATE_FILE}.cookies.json`, "utf8"));
+  assert.equal(saved.cookies.find((cookie) => cookie.name === "JSESSIONID").value, "survives-failure");
+  globalThis.fetch = async (input, options) => {
+    if (new URL(input).hostname === "www.zhixue.com") {
+      assert.equal(new Headers(options.headers).get("Cookie"), "JSESSIONID=survives-failure");
+    }
+    return upstream(input, options);
+  };
+  f.setBarkStatus(200);
+  assert.equal(await runArcadiaMonitor(f.env), 0);
+});

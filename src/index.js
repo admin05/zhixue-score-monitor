@@ -111,10 +111,10 @@ function apiUrl(path, params = {}) {
   return url;
 }
 
-async function getJson(url, headers = {}) {
+async function getJson(url, headers = {}, fetchZhixue = globalThis.fetch) {
   let response;
   try {
-    response = await fetch(url, {
+    response = await fetchZhixue(url, {
       headers: { "User-Agent": USER_AGENT, Referer: "https://www.zhixue.com/", ...headers },
       redirect: "follow",
       signal: AbortSignal.timeout(30_000),
@@ -145,7 +145,7 @@ function requireResult(body, label) {
   return body.result;
 }
 
-async function getAuthHeaders(cookie) {
+async function getAuthHeaders(cookie, fetchZhixue) {
   const authGuid = crypto.randomUUID();
   const authTimestamp = String(Date.now());
   const authToken = md5Hex(`${authGuid}${authTimestamp}iflytek!@#123student`);
@@ -155,14 +155,14 @@ async function getAuthHeaders(cookie) {
     authtimestamp: authTimestamp,
     authtoken: authToken,
   };
-  const body = await getJson(apiUrl("/container/app/token/getToken"), { Cookie: cookie, ...base });
+  const body = await getJson(apiUrl("/container/app/token/getToken"), { Cookie: cookie, ...base }, fetchZhixue);
   const xToken = requireResult(body, "登录令牌");
   if (typeof xToken !== "string" || !xToken) throw new Error("登录令牌为空");
   return { ...base, XToken: xToken };
 }
 
-async function zhixueFetch(path, cookie, params, headers = {}) {
-  return getJson(apiUrl(path, params), { Cookie: cookie, ...headers });
+async function zhixueFetch(path, cookie, params, headers = {}, fetchZhixue) {
+  return getJson(apiUrl(path, params), { Cookie: cookie, ...headers }, fetchZhixue);
 }
 
 function scoreSnapshot(examId, examName, report) {
@@ -182,15 +182,15 @@ function scoreSnapshot(examId, examName, report) {
   return { id: String(examId), name: String(examName), subjects };
 }
 
-async function loadExamContext(cookie) {
+async function loadExamContext(cookie, fetchZhixue) {
   const sessionCookie = buildSessionCookie(cookie);
 
-  const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie), "账号信息");
+  const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie, {}, {}, fetchZhixue), "账号信息");
   if (user?.role && user.role !== "student") throw new Error("当前 Cookie 对应的不是学生账号");
 
-  const auth = await getAuthHeaders(sessionCookie);
+  const auth = await getAuthHeaders(sessionCookie, fetchZhixue);
   const academicYears = requireResult(
-    await zhixueFetch("/zhixuebao/base/common/academicYear", sessionCookie, {}, auth),
+    await zhixueFetch("/zhixuebao/base/common/academicYear", sessionCookie, {}, auth, fetchZhixue),
     "学年列表",
   );
   if (!Array.isArray(academicYears) || academicYears.length === 0) {
@@ -204,6 +204,7 @@ async function loadExamContext(cookie) {
       sessionCookie,
       { pageIndex: 1, pageSize: PAGE_SIZE, startSchoolYear: year.beginTime, endSchoolYear: year.endTime },
       auth,
+      fetchZhixue,
     ),
     "考试列表",
   );
@@ -217,8 +218,8 @@ export async function probeZhixue(cookie) {
   return { academicYearCount, examCount: exams.length };
 }
 
-async function loadCurrentScores(cookie) {
-  const { exams, sessionCookie, auth } = await loadExamContext(cookie);
+async function loadCurrentScores(cookie, fetchZhixue) {
+  const { exams, sessionCookie, auth } = await loadExamContext(cookie, fetchZhixue);
 
   const snapshots = [];
   for (const exam of exams) {
@@ -228,6 +229,7 @@ async function loadCurrentScores(cookie) {
       sessionCookie,
       { examId: exam.examId },
       auth,
+      fetchZhixue,
     );
     snapshots.push(scoreSnapshot(exam.examId, exam.examName, report));
   }
@@ -251,13 +253,13 @@ async function sendBark(key, changes) {
   if (!response.ok) throw new Error(`Bark 推送失败 (${response.status})`);
 }
 
-export async function runMonitor(env, { notifyChanges } = {}) {
+export async function runMonitor(env, { notifyChanges, fetchZhixue } = {}) {
   if (!env.ZHIXUE_COOKIE) throw new Error("缺少 ZHIXUE_COOKIE Secret");
   if (!env.STATE) throw new Error("缺少 STATE KV 绑定");
 
   const previousState = await env.STATE.get(STATE_KEY, "json");
   const previous = previousState?.grades ?? {};
-  const currentScores = await loadCurrentScores(env.ZHIXUE_COOKIE);
+  const currentScores = await loadCurrentScores(env.ZHIXUE_COOKIE, fetchZhixue);
   const current = Object.fromEntries(currentScores.map((exam) => [exam.id, exam]));
   const changes = findScoreChanges(previous, currentScores);
 

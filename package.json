@@ -5,7 +5,7 @@
   "scripts": {
     "start:arcadia": "node scripts/arcadia-monitor.js",
     "test": "node --test",
-    "check": "node --check src/index.js && node --check src/bark.js && node --check src/file-state.js && node --check scripts/arcadia-monitor.js"
+    "check": "node --check src/index.js && node --check src/bark.js && node --check src/file-state.js && node --check src/cookie-session.js && node --check scripts/arcadia-monitor.js"
   },
   "devDependencies": {
     "wrangler": "^4.0.0"
