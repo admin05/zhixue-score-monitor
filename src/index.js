@@ -112,10 +112,19 @@ function apiUrl(path, params = {}) {
 }
 
 async function getJson(url, headers = {}) {
-  const response = await fetch(url, {
-    headers: { "User-Agent": USER_AGENT, Referer: "https://www.zhixue.com/", ...headers },
-    redirect: "follow",
-  });
+  let response;
+  try {
+    response = await fetch(url, {
+      headers: { "User-Agent": USER_AGENT, Referer: "https://www.zhixue.com/", ...headers },
+      redirect: "follow",
+    });
+  } catch (error) {
+    const code = error?.cause?.code ?? error?.code ?? error?.name ?? "unknown";
+    const syscall = error?.cause?.syscall;
+    const details = [`host=${url.hostname}`, `code=${code}`];
+    if (syscall) details.push(`syscall=${syscall}`);
+    throw new Error(`智学网连接失败 (${details.join("; ")})`);
+  }
   if (!response.ok) {
     const server = response.headers.get("server") ?? "unknown";
     const cfRay = response.headers.get("cf-ray");

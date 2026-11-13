@@ -84,6 +84,26 @@ test("includes safe upstream diagnostics for failed Zhixue requests", async () =
   }
 });
 
+test("reports safe network error codes when Zhixue cannot be reached", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    throw new TypeError("fetch failed", { cause: { code: "ECONNRESET", syscall: "connect" } });
+  };
+
+  try {
+    await assert.rejects(
+      probeZhixue("private-cookie=value"),
+      (error) => {
+        assert.equal(error.message, "智学网连接失败 (host=www.zhixue.com; code=ECONNRESET; syscall=connect)");
+        assert.doesNotMatch(error.message, /private-cookie/);
+        return true;
+      },
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("protects the manual trigger endpoint and accepts authorized POST requests", async () => {
   const request = new Request("https://monitor.example/__run", { method: "POST" });
   const unauthorized = await monitor.fetch(request, { MANUAL_TRIGGER_KEY: "expected" }, { waitUntil() {} });
