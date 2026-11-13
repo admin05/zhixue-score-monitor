@@ -47,4 +47,8 @@ npm test
 npm run check
 ```
 
+## GitHub Actions 连通性测试
+
+在 GitHub 仓库 Settings → Secrets and variables → Actions 中添加仓库 Secret `ZHIXUE_COOKIE`，值为从已登录智学网页面复制的完整 Cookie。然后在 Actions 页面手动运行 `Zhixue connectivity test`。该测试只确认学生账号、登录令牌、学年和考试列表接口可访问，不读取成绩详情，也不保存 Cookie 或成绩。运行摘要只包含学年数和考试场数。
+
 要在 Cloudflare 实际验证登录与查询，需要提供有效的 Cloudflare 部署权限并将智学网 Cookie 设为 Secret；本仓库不保存这些凭据。

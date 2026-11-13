@@ -172,7 +172,7 @@ function scoreSnapshot(examId, examName, report) {
   return { id: String(examId), name: String(examName), subjects };
 }
 
-async function loadCurrentScores(cookie) {
+async function loadExamContext(cookie) {
   const sessionCookie = buildSessionCookie(cookie);
 
   const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie), "账号信息");
@@ -183,7 +183,9 @@ async function loadCurrentScores(cookie) {
     await zhixueFetch("/zhixuebao/base/common/academicYear", sessionCookie, {}, auth),
     "学年列表",
   );
-  if (!Array.isArray(academicYears) || academicYears.length === 0) return [];
+  if (!Array.isArray(academicYears) || academicYears.length === 0) {
+    return { academicYearCount: 0, exams: [], sessionCookie, auth };
+  }
 
   const year = academicYears[0];
   const examResult = requireResult(
@@ -196,6 +198,17 @@ async function loadCurrentScores(cookie) {
     "考试列表",
   );
   const exams = Array.isArray(examResult?.examList) ? examResult.examList : [];
+  return { academicYearCount: academicYears.length, exams, sessionCookie, auth };
+}
+
+export async function probeZhixue(cookie) {
+  if (!cookie?.trim()) throw new Error("缺少 ZHIXUE_COOKIE 环境变量");
+  const { academicYearCount, exams } = await loadExamContext(cookie);
+  return { academicYearCount, examCount: exams.length };
+}
+
+async function loadCurrentScores(cookie) {
+  const { exams, sessionCookie, auth } = await loadExamContext(cookie);
 
   const snapshots = [];
   for (const exam of exams) {

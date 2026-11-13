@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import monitor, { buildSessionCookie, findScoreChanges, md5Hex, parseCookieHeader, runMonitor } from "../src/index.js";
+import monitor, { buildSessionCookie, findScoreChanges, md5Hex, parseCookieHeader, probeZhixue, runMonitor } from "../src/index.js";
 
 test("parses cookie values containing equals signs", () => {
   assert.deepEqual(parseCookieHeader("a=1; loginUserName=student%3D1; session=abc=="), {
@@ -25,6 +25,36 @@ test("adds the legacy uname cookie only when loginUserName exists", () => {
 test("computes MD5 hashes needed by the Zhixue token endpoint", () => {
   assert.equal(md5Hex(""), "d41d8cd98f00b204e9800998ecf8427e");
   assert.equal(md5Hex("abc"), "900150983cd24fb0d6963f7d28e17f72");
+});
+
+test("probes account and exam-list access without requesting score reports", async () => {
+  const originalFetch = globalThis.fetch;
+  const requestedPaths = [];
+  globalThis.fetch = async (input) => {
+    const url = new URL(input);
+    requestedPaths.push(url.pathname);
+    if (url.pathname === "/container/getCurrentUser") return Response.json({ result: { role: "student" } });
+    if (url.pathname === "/container/app/token/getToken") return Response.json({ result: "test-token" });
+    if (url.pathname === "/zhixuebao/base/common/academicYear") {
+      return Response.json({ result: [{ beginTime: "2026-09-01", endTime: "2027-08-31" }] });
+    }
+    if (url.pathname === "/zhixuebao/report/exam/getUserExamList") {
+      return Response.json({ result: { examList: [{ examId: "exam-1" }, { examId: "exam-2" }] } });
+    }
+    throw new Error(`Unexpected request to ${url.pathname}`);
+  };
+
+  try {
+    assert.deepEqual(await probeZhixue("JSESSIONID=test"), { academicYearCount: 1, examCount: 2 });
+    assert.deepEqual(requestedPaths, [
+      "/container/getCurrentUser",
+      "/container/app/token/getToken",
+      "/zhixuebao/base/common/academicYear",
+      "/zhixuebao/report/exam/getUserExamList",
+    ]);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("includes safe upstream diagnostics for failed Zhixue requests", async () => {
