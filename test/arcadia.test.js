@@ -199,3 +199,36 @@ test("Cookie rotation survives a later failed report and Bark notification", asy
   f.setBarkStatus(200);
   assert.equal(await runArcadiaMonitor(f.env), 0);
 });
+
+test("retries a rejected persisted session with the environment cookie without saving rejected cookies", async (t) => {
+  const f = await fixture(t);
+  assert.equal(await runArcadiaMonitor(f.env), 0);
+  const cookiePath = `${f.env.ZHIXUE_STATE_FILE}.cookies.json`;
+  const saved = JSON.parse(await readFile(cookiePath, "utf8"));
+  saved.cookies.find((cookie) => cookie.name === "JSESSIONID").value = "stale-session";
+  await writeFile(cookiePath, JSON.stringify(saved));
+
+  const upstream = globalThis.fetch;
+  const accountCookies = [];
+  globalThis.fetch = async (input, options) => {
+    const url = new URL(input);
+    if (url.hostname === "www.zhixue.com" && url.pathname === "/container/getCurrentUser") {
+      const cookie = new Headers(options.headers).get("Cookie");
+      accountCookies.push(cookie);
+      if (cookie.includes("stale-session")) {
+        const rejected = Response.json({ errorCode: -200, errorInfo: "操作失败", result: null });
+        rejected.headers.append("Set-Cookie", "JSESSIONID=anonymous-session; Path=/");
+        return rejected;
+      }
+    }
+    return upstream(input, options);
+  };
+
+  assert.equal(await runArcadiaMonitor(f.env), 0);
+  assert.equal(accountCookies.length, 2);
+  assert.match(accountCookies[0], /stale-session/);
+  assert.match(accountCookies[1], /test-session/);
+  const after = JSON.parse(await readFile(cookiePath, "utf8"));
+  assert.equal(after.cookies.find((cookie) => cookie.name === "JSESSIONID").value, "test-session");
+  assert.equal(f.logs.some((line) => /改用 ZHIXUE_COOKIE 做一次重试/.test(line)), true);
+});

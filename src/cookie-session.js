@@ -66,13 +66,13 @@ function parseSetCookie(line, url, now) {
   return validCookie(cookie) ? cookie : null;
 }
 
-export async function createCookieSession(seed, filePath) {
+export async function createCookieSession(seed, filePath, { preferSeed = false, deferPersistence = false } = {}) {
   const sourceHash = createHash("sha256").update(seed.trim()).digest("hex");
   let cookies;
   try {
     const saved = JSON.parse(await readFile(filePath, "utf8"));
     // 手动更换环境变量时，旧会话不再覆盖新登录。
-    if (saved?.sourceHash === sourceHash) {
+    if (!preferSeed && saved?.sourceHash === sourceHash) {
       if (saved.version !== 1 || !Array.isArray(saved.cookies) || !saved.cookies.every(validCookie)) {
         throw new Error("invalid cookie file");
       }
@@ -88,6 +88,7 @@ export async function createCookieSession(seed, filePath) {
   }
   let updateCount = 0;
   let deletionCount = 0;
+  let persistenceEnabled = !deferPersistence;
 
   async function save() {
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
@@ -103,11 +104,16 @@ export async function createCookieSession(seed, filePath) {
   }
 
   // 先保存手动导入结果；后续失败也不恢复已经失效的旧 Cookie。
-  await save();
+  if (persistenceEnabled) await save();
   return {
     source,
     get updateCount() { return updateCount; },
     get deletionCount() { return deletionCount; },
+    get persisted() { return persistenceEnabled; },
+    async persist() {
+      persistenceEnabled = true;
+      await save();
+    },
     async fetch(input, options = {}) {
       let url = new URL(input);
       for (let redirectCount = 0; redirectCount <= 5; redirectCount += 1) {
@@ -137,7 +143,7 @@ export async function createCookieSession(seed, filePath) {
           if (cookie.expires === null || cookie.expires > Date.now()) cookies.push(cookie);
         }
         // 必须在解析 JSON/状态码之前保存：即使后续请求失败，轮换也不能丢。
-        await save();
+        if (persistenceEnabled) await save();
         updateCount += updates;
         deletionCount += deletions;
         if (![301, 302, 303, 307, 308].includes(response.status) || !response.headers.has("location")) return response;

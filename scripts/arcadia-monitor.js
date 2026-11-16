@@ -14,24 +14,35 @@ export async function runArcadiaMonitor(env = process.env) {
   try {
     if (!env.ZHIXUE_COOKIE?.trim()) throw new Error("缺少 ZHIXUE_COOKIE 环境变量，请在 Arcadia 环境配置中添加登录 Cookie");
     await withFileStateLock(statePath, async () => {
-      const session = await createCookieSession(env.ZHIXUE_COOKIE, `${statePath}.cookies.json`);
-      console.log(`Cookie 来源：${session.source}`);
-      const result = await runMonitor({
-        ZHIXUE_COOKIE: env.ZHIXUE_COOKIE,
-        STATE: createFileState(statePath),
-      }, {
+      const cookiePath = `${statePath}.cookies.json`;
+      const state = createFileState(statePath);
+      const monitorOptions = (session) => ({
         fetchZhixue: (url, options) => session.fetch(url, options),
+        onAccountValidated: () => session.persist(),
         // 推送失败时不推进快照，下次运行仍会重试这些变化。
         notifyChanges: (changes, { examCount }) => sendBarkNotification(
           env.BARK,
           `${SCRIPT_NAME}运行成功`,
           `扫描 ${examCount} 场考试；成绩变化 ${changes.length} 项\n${formatScoreChanges(changes)}`,
         ),
-      }).finally(() => {
-        if (session.updateCount) {
+      });
+      let session = await createCookieSession(env.ZHIXUE_COOKIE, cookiePath, { deferPersistence: true });
+      console.log(`Cookie 来源：${session.source}`);
+      let result;
+      try {
+        result = await runMonitor({ ZHIXUE_COOKIE: env.ZHIXUE_COOKIE, STATE: state }, monitorOptions(session));
+      } catch (error) {
+        if (session.source !== "本地持久化会话" ||
+          !/接口=\/container\/getCurrentUser/.test(error instanceof Error ? error.message : "")) throw error;
+        console.warn("持久化会话未通过账号检查，改用 ZHIXUE_COOKIE 做一次重试");
+        session = await createCookieSession(env.ZHIXUE_COOKIE, cookiePath, { preferSeed: true, deferPersistence: true });
+        console.log(`Cookie 重试来源：${session.source}`);
+        result = await runMonitor({ ZHIXUE_COOKIE: env.ZHIXUE_COOKIE, STATE: state }, monitorOptions(session));
+      } finally {
+        if (session.persisted && session.updateCount) {
           console.log(`Cookie 会话更新已持久化：${session.updateCount} 项，其中过期删除 ${session.deletionCount} 项（不代表登录验证通过）`);
         }
-      });
+      }
       const stage = result.baselineCreated ? "已建立首次成绩基线" : "扫描完成";
       const summary = `${stage}；考试 ${result.examCount} 场；成绩变化 ${result.changeCount} 项`;
       console.log(`${SCRIPT_NAME}：成功；${summary}`);

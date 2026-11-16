@@ -196,7 +196,7 @@ function scoreSnapshot(examId, examName, report) {
   return { id: String(examId), name: String(examName), subjects };
 }
 
-async function loadExamContext(cookie, fetchZhixue) {
+async function loadExamContext(cookie, fetchZhixue, onAccountValidated) {
   const sessionCookie = buildSessionCookie(cookie);
 
   const user = requireResult(await zhixueFetch("/container/getCurrentUser", sessionCookie, {}, {}, fetchZhixue), "账号信息");
@@ -204,6 +204,7 @@ async function loadExamContext(cookie, fetchZhixue) {
     throw new Error("账号信息为空或格式异常 (接口=/container/getCurrentUser)，未通过登录检查，请重新登录并更新 ZHIXUE_COOKIE 后重试");
   }
   if (user?.role && user.role !== "student") throw new Error("当前 Cookie 对应的不是学生账号");
+  await onAccountValidated?.();
 
   const auth = await getAuthHeaders(sessionCookie, fetchZhixue);
   const academicYears = requireResult(
@@ -235,8 +236,8 @@ export async function probeZhixue(cookie) {
   return { academicYearCount, examCount: exams.length };
 }
 
-async function loadCurrentScores(cookie, fetchZhixue) {
-  const { exams, sessionCookie, auth } = await loadExamContext(cookie, fetchZhixue);
+async function loadCurrentScores(cookie, fetchZhixue, onAccountValidated) {
+  const { exams, sessionCookie, auth } = await loadExamContext(cookie, fetchZhixue, onAccountValidated);
 
   const snapshots = [];
   for (const exam of exams) {
@@ -270,13 +271,13 @@ async function sendBark(key, changes) {
   if (!response.ok) throw new Error(`Bark 推送失败 (${response.status})`);
 }
 
-export async function runMonitor(env, { notifyChanges, fetchZhixue } = {}) {
+export async function runMonitor(env, { notifyChanges, fetchZhixue, onAccountValidated } = {}) {
   if (!env.ZHIXUE_COOKIE) throw new Error("缺少 ZHIXUE_COOKIE Secret");
   if (!env.STATE) throw new Error("缺少 STATE KV 绑定");
 
   const previousState = await env.STATE.get(STATE_KEY, "json");
   const previous = previousState?.grades ?? {};
-  const currentScores = await loadCurrentScores(env.ZHIXUE_COOKIE, fetchZhixue);
+  const currentScores = await loadCurrentScores(env.ZHIXUE_COOKIE, fetchZhixue, onAccountValidated);
   const current = Object.fromEntries(currentScores.map((exam) => [exam.id, exam]));
   const changes = findScoreChanges(previous, currentScores);
 
