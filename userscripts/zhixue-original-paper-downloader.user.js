@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         智学网考生批改原卷打印
 // @namespace    https://github.com/admin05/zhixue-score-monitor
-// @version      1.1.1
+// @version      1.1.2
 // @description  在智学网成绩报告页批量打印所选考试各科带批改的原卷
 // @match        https://www.zhixue.com/activitystudy/web-report/*
 // @updateURL    https://raw.githubusercontent.com/admin05/zhixue-score-monitor/main/userscripts/zhixue-original-paper-downloader.user.js
@@ -184,6 +184,24 @@
     });
   }
 
+  async function switchHashRoute(route) {
+    if (window.location.hash !== `#${route}`) {
+      await new Promise((resolve) => {
+        const onChange = () => {
+          clearTimeout(timeoutId);
+          resolve();
+        };
+        const timeoutId = setTimeout(() => {
+          window.removeEventListener("hashchange", onChange);
+          resolve();
+        }, 2000);
+        window.addEventListener("hashchange", onChange, { once: true });
+        window.location.hash = route;
+      });
+    }
+    await new Promise((resolve) => setTimeout(resolve, 300));
+  }
+
   async function printPaper(exam, paper, year) {
     const route = [
       "",
@@ -204,7 +222,9 @@
     window.addEventListener("afterprint", onAfterPrint, { once: true });
 
     try {
-      window.location.hash = route;
+      // Leaving the detail route first forces the SPA to load the next paper instead of reusing the first one.
+      await switchHashRoute("/zxb-report");
+      await switchHashRoute(route);
       await waitForPageRender();
       if (!sawBeforePrint) window.print();
       let timeoutId;
