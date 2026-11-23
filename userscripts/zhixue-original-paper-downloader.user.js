@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         智学网考生批改原卷打印
 // @namespace    https://github.com/admin05/zhixue-score-monitor
-// @version      1.1.0
+// @version      1.1.1
 // @description  在智学网成绩报告页批量打印所选考试各科带批改的原卷
 // @match        https://www.zhixue.com/activitystudy/web-report/*
 // @updateURL    https://raw.githubusercontent.com/admin05/zhixue-score-monitor/main/userscripts/zhixue-original-paper-downloader.user.js
@@ -160,7 +160,8 @@
       let stableTimer;
       let minimumTimer;
       let finished = false;
-      const observer = new MutationObserver(check);
+      let observer;
+      const startedAt = Date.now();
       const finish = () => {
         if (finished) return;
         finished = true;
@@ -176,7 +177,7 @@
           else check();
         }, 1000);
       };
-      const startedAt = Date.now();
+      observer = new MutationObserver(check);
       observer.observe(document.body, { childList: true, subtree: true, attributes: true });
       minimumTimer = setTimeout(finish, 20_000);
       check();
@@ -260,7 +261,9 @@
       const summary = `考试：${exam.examName}\n已打开 ${printCount} 个科目的打印窗口`;
       if (failures.length) {
         console.warn("原卷打印未完成的项目：", failures);
-        alert(`${summary}\n\n未完成 ${failures.length} 项，详情见 Console。`);
+        const details = failures.slice(0, 8).join("\n");
+        const more = failures.length > 8 ? `\n另有 ${failures.length - 8} 项未显示。` : "";
+        alert(`${summary}\n\n未完成 ${failures.length} 项：\n${details}${more}`);
       } else {
         alert(`${summary}\n\n请在每个打印窗口中选择“另存为 PDF”并保存。`);
       }
