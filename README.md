@@ -2,6 +2,12 @@
 
 定时读取智学网学生成绩，支持 NAS Arcadia（Node.js）和 Cloudflare Worker 两种运行方式。首次执行保存当前基线，之后新增科目成绩或成绩更正时通过 Bark 通知。当前扫描最近学年考试列表第一页（最多 10 场）。
 
+## Tampermonkey 原卷下载
+
+安装 [智学网考生原卷批量下载](https://raw.githubusercontent.com/admin05/zhixue-score-monitor/main/userscripts/zhixue-original-paper-downloader.user.js) 用户脚本后，登录智学网并打开成绩报告页。点击页面右下角的“下载考生原卷”，从考试列表中选择一场考试，脚本会依次下载该场考试各科的原卷图片。Chrome 首次可能会询问是否允许该网站进行多文件下载。
+
+脚本使用当前页面的登录会话，只在你点击按钮后请求智学网接口，不读取、显示或上传 Cookie。原卷以图片文件保存在 Chrome 默认下载目录；若有科目未完成，提示框会显示数量，具体项目可在开发者工具 Console 查看。Tampermonkey 会按脚本元数据检查更新。
+
 ## NAS / Arcadia 部署
 
 Arcadia 版本入口为 `scripts/arcadia-monitor.js`，使用 Node.js 22 或更高版本，无第三方运行时依赖，不需要 Cloudflare、KV、Wrangler 或 `npm install`。每次启动扫描一次并退出，由 Arcadia 定时调度。
