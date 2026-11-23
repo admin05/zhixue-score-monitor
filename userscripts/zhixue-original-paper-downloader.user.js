@@ -1,8 +1,8 @@
 // ==UserScript==
-// @name         智学网考生原卷批量下载
+// @name         智学网考生批改原卷打印
 // @namespace    https://github.com/admin05/zhixue-score-monitor
-// @version      1.0.0
-// @description  在智学网成绩报告页批量下载所选考试各科原卷图片
+// @version      1.1.0
+// @description  在智学网成绩报告页批量打印所选考试各科带批改的原卷
 // @match        https://www.zhixue.com/activitystudy/web-report/*
 // @updateURL    https://raw.githubusercontent.com/admin05/zhixue-score-monitor/main/userscripts/zhixue-original-paper-downloader.user.js
 // @downloadURL  https://raw.githubusercontent.com/admin05/zhixue-score-monitor/main/userscripts/zhixue-original-paper-downloader.user.js
@@ -152,23 +152,73 @@
       exams.push(...page);
       if (page.length < PAGE_SIZE) break;
     }
-    return exams;
+    return { years, exams };
   }
 
-  function safeFilename(value) {
-    return String(value || "")
-      .replace(/[\\/:*?"<>|]/g, "_")
-      .replace(/\s+/g, "_");
+  function waitForPageRender() {
+    return new Promise((resolve) => {
+      let stableTimer;
+      let minimumTimer;
+      let finished = false;
+      const observer = new MutationObserver(check);
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(stableTimer);
+        clearTimeout(minimumTimer);
+        observer.disconnect();
+        resolve();
+      };
+      const check = () => {
+        clearTimeout(stableTimer);
+        stableTimer = setTimeout(() => {
+          if (Date.now() - startedAt >= 5000) finish();
+          else check();
+        }, 1000);
+      };
+      const startedAt = Date.now();
+      observer.observe(document.body, { childList: true, subtree: true, attributes: true });
+      minimumTimer = setTimeout(finish, 20_000);
+      check();
+    });
   }
 
-  function imageExtension(blob, imageUrl) {
-    if (blob.type.includes("png")) return "png";
-    if (blob.type.includes("webp")) return "webp";
-    const match = new URL(imageUrl).pathname.match(/\.(jpe?g|png|webp)$/i);
-    return match ? match[1].toLowerCase().replace("jpeg", "jpg") : "jpg";
+  async function printPaper(exam, paper, year) {
+    const route = [
+      "",
+      "zxb-report",
+      "original-roll-detail",
+      exam.examId,
+      paper.paperId,
+      year.beginTime,
+      year.endTime,
+    ].map(encodeURIComponent).join("/");
+
+    let sawBeforePrint = false;
+    let finishPrint;
+    const printFinished = new Promise((resolve) => { finishPrint = resolve; });
+    const onBeforePrint = () => { sawBeforePrint = true; };
+    const onAfterPrint = () => finishPrint();
+    window.addEventListener("beforeprint", onBeforePrint);
+    window.addEventListener("afterprint", onAfterPrint, { once: true });
+
+    try {
+      window.location.hash = route;
+      await waitForPageRender();
+      if (!sawBeforePrint) window.print();
+      let timeoutId;
+      await Promise.race([
+        printFinished,
+        new Promise((resolve) => { timeoutId = setTimeout(resolve, 60_000); }),
+      ]);
+      clearTimeout(timeoutId);
+    } finally {
+      window.removeEventListener("beforeprint", onBeforePrint);
+      window.removeEventListener("afterprint", onAfterPrint);
+    }
   }
 
-  async function downloadExam(exam, authHeaders) {
+  async function printExam(exam, year, authHeaders) {
     const report = resultOf(
       await getJson("/zhixuebao/report/exam/getReportMain", { examId: exam.examId }, authHeaders),
       "考试报告",
@@ -176,53 +226,18 @@
     const papers = Array.isArray(report?.paperList) ? report.paperList : [];
     if (!papers.length) throw new Error("报告中没有可下载的科目");
 
-    let downloadCount = 0;
+    let printCount = 0;
     const failures = [];
     for (const paper of papers) {
       if (!paper?.paperId) continue;
       try {
-        const body = await getJson("/zhixuebao/report/checksheet/", {
-          examId: exam.examId,
-          paperId: paper.paperId,
-        }, authHeaders);
-        const result = resultOf(body, `原卷 ${paper.subjectName}`);
-        let images = result?.sheetImages ?? [];
-        if (typeof images === "string") {
-          try {
-            images = JSON.parse(images);
-          } catch {
-            images = [];
-          }
-        }
-        if (!Array.isArray(images) || !images.length) {
-          failures.push(`${paper.subjectName}：没有原卷图片`);
-          continue;
-        }
-
-        for (let index = 0; index < images.length; index += 1) {
-          const imageUrl = new URL(images[index], BASE_URL);
-          try {
-            const response = await fetch(imageUrl, { credentials: "include" });
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const blob = await response.blob();
-            const link = document.createElement("a");
-            link.href = URL.createObjectURL(blob);
-            link.download = `${safeFilename(exam.examName)}_${safeFilename(paper.subjectName)}_${String(index + 1).padStart(2, "0")}.${imageExtension(blob, imageUrl)}`;
-            document.body.appendChild(link);
-            link.click();
-            link.remove();
-            setTimeout(() => URL.revokeObjectURL(link.href), 60_000);
-            downloadCount += 1;
-            await new Promise((resolve) => setTimeout(resolve, 400));
-          } catch (error) {
-            failures.push(`${paper.subjectName} 第 ${index + 1} 页：${error.message}`);
-          }
-        }
+        await printPaper(exam, paper, year);
+        printCount += 1;
       } catch (error) {
-        failures.push(`${paper.subjectName}：${error.message}`);
+        failures.push(`${paper.subjectName}：${error instanceof Error ? error.message : "打印失败"}`);
       }
     }
-    return { downloadCount, failures };
+    return { printCount, failures };
   }
 
   async function startDownload(button) {
@@ -230,7 +245,7 @@
     button.textContent = "读取考试列表…";
     try {
       const authHeaders = await getAuthHeaders();
-      const exams = await getExams(authHeaders);
+      const { years, exams } = await getExams(authHeaders);
       if (!exams.length) throw new Error("本学年没有找到考试");
 
       const menu = exams.map((exam, index) => `${index + 1}. ${exam.examName}`).join("\n");
@@ -239,20 +254,20 @@
       const exam = exams[Number(answer) - 1];
       if (!exam?.examId) throw new Error("序号无效");
 
-      button.textContent = "下载原卷中…";
-      const { downloadCount, failures } = await downloadExam(exam, authHeaders);
-      button.textContent = `已触发 ${downloadCount} 页下载`;
-      const summary = `考试：${exam.examName}\n已触发下载：${downloadCount} 张图片`;
+      button.textContent = "准备打印带批改原卷…";
+      const { printCount, failures } = await printExam(exam, years[0], authHeaders);
+      button.textContent = `已打印 ${printCount} 个科目`;
+      const summary = `考试：${exam.examName}\n已打开 ${printCount} 个科目的打印窗口`;
       if (failures.length) {
-        console.warn("原卷下载未完成的项目：", failures);
+        console.warn("原卷打印未完成的项目：", failures);
         alert(`${summary}\n\n未完成 ${failures.length} 项，详情见 Console。`);
       } else {
-        alert(`${summary}\n\n请检查 Chrome 下载列表。`);
+        alert(`${summary}\n\n请在每个打印窗口中选择“另存为 PDF”并保存。`);
       }
     } catch (error) {
-      console.error("智学网原卷下载失败：", error);
-      button.textContent = "下载失败，点击重试";
-      alert(`原卷下载失败：${error.message}`);
+      console.error("智学网原卷打印失败：", error);
+      button.textContent = "打印失败，点击重试";
+      alert(`原卷打印失败：${error.message}`);
     } finally {
       button.disabled = false;
     }
@@ -263,8 +278,8 @@
     const button = document.createElement("button");
     button.id = "zxw-original-paper-downloader";
     button.type = "button";
-    button.textContent = "下载考生原卷";
-    button.title = "选择一场考试，批量下载该场考试各科原卷图片";
+    button.textContent = "打印带批改原卷";
+    button.title = "选择一场考试，逐科打开包含红色批改的原卷打印窗口";
     Object.assign(button.style, {
       position: "fixed",
       right: "20px",
